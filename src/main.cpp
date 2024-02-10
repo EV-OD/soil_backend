@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #endif
 #include <Firebase_ESP_Client.h>
+#include <HTTPClient.h>
 
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
@@ -87,6 +88,65 @@ void setCurrentMoistureValue(int value)
   }
 }
 
+String callAPI(const String &url)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    HTTPClient http;
+    http.begin(url);
+
+    int httpResponseCode = http.GET();
+
+    if (httpResponseCode > 0)
+    {
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+      String payload = http.getString();
+      Serial.println(payload);
+      return payload;
+    }
+    else
+    {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+      return "Something went wrong";
+    }
+
+    http.end();
+  }
+  else
+  {
+    Serial.println("WiFi Disconnected");
+    return "WiFi Disconnected";
+  }
+}
+
+String getDate()
+{
+  return callAPI("http://worldtimeapi.org/api/timezone/Asia/Kathmandu");
+}
+
+void setMoistureDataWithDateAndTimeAsJson(int value)
+{
+  if (Firebase.ready() && signupOK)
+  {
+    FirebaseJson json;
+    json.add("value", value);
+    json.add("datetime", getDate());
+    if (Firebase.RTDB.pushJSON(&fbdo, "soilMoisture/wholeData", &json))
+    {
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else
+    {
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
+  }
+}
+
 void readData()
 {
   if (Firebase.RTDB.getBool(&motorfbdo, "motor/autoOnOff"))
@@ -121,7 +181,9 @@ void readData()
     Serial.println("FAILED");
     Serial.println("REASON: " + fbdo.errorReason());
   }
-  setCurrentMoistureValue(1000);
+  long int randomValue = random(0, 1000);
+  setCurrentMoistureValue(randomValue);
+  setMoistureDataWithDateAndTimeAsJson(randomValue);
 }
 
 void connectToWiFi()
