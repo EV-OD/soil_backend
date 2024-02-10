@@ -1,28 +1,23 @@
 #include <Arduino.h>
 #if defined(ESP32)
-  #include <WiFi.h>
+#include <WiFi.h>
 #elif defined(ESP8266)
-  #include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
 #endif
 #include <Firebase_ESP_Client.h>
 
-//Provide the token generation process info.
 #include "addons/TokenHelper.h"
-//Provide the RTDB payload printing info and other helper functions.
 #include "addons/RTDBHelper.h"
 
-// Insert your network credentials
 #define WIFI_SSID "Rabin"
 #define WIFI_PASSWORD "12345678"
 
-// Insert Firebase project API Key
 #define API_KEY "AIzaSyCITbn7Mh9QPGlKQEE16SSBHP8ad9bzOAQ"
 
-// Insert RTDB URLefine the RTDB URL */
-#define DATABASE_URL "https://soil-d5d51-default-rtdb.firebaseio.com" 
+#define DATABASE_URL "https://soil-d5d51-default-rtdb.firebaseio.com"
 
-//Define Firebase Data object
 FirebaseData fbdo;
+FirebaseData motorfbdo;
 
 FirebaseAuth auth;
 FirebaseConfig config;
@@ -30,12 +25,112 @@ FirebaseConfig config;
 unsigned long sendDataPrevMillis = 0;
 int count = 0;
 bool signupOK = false;
+bool isMotorOn = false;
+bool autoMotorOnOff = false;
+int soilMoistureValue = 0;
+int thresholdValue = 500;
 
-void setup(){
+void setMotor(bool isOn)
+{
+  isMotorOn = isOn;
+  if (Firebase.ready() && signupOK)
+  {
+    if (Firebase.RTDB.setBool(&fbdo, "motor/isOn", isOn))
+    {
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else
+    {
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
+  }
+}
+
+void setAutoMotorOnOff(bool isOn)
+{
+  autoMotorOnOff = isOn;
+  if (Firebase.ready() && signupOK)
+  {
+    if (Firebase.RTDB.setBool(&fbdo, "motor/autoOnOff", isOn))
+    {
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else
+    {
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
+  }
+}
+
+void setCurrentMoistureValue(int value)
+{
+  soilMoistureValue = value;
+  if (Firebase.ready() && signupOK)
+  {
+    if (Firebase.RTDB.setInt(&fbdo, "soilMoisture/currentValue", value))
+    {
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else
+    {
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
+  }
+}
+
+void readData()
+{
+  if (Firebase.RTDB.getBool(&motorfbdo, "motor/autoOnOff"))
+  {
+    if (motorfbdo.boolData())
+    {
+      Serial.println(motorfbdo.boolData());
+      autoMotorOnOff = motorfbdo.boolData();
+    }
+    else
+    {
+      autoMotorOnOff = false;
+    }
+  }
+
+  if (Firebase.RTDB.getBool(&fbdo, "motor/isOn"))
+  {
+    if (fbdo.boolData())
+    {
+      Serial.println("true");
+      isMotorOn = fbdo.boolData();
+    }
+    else
+    {
+      Serial.println("false");
+      isMotorOn = false;
+    }
+  }
+  else
+  {
+    isMotorOn = false;
+    Serial.println("FAILED");
+    Serial.println("REASON: " + fbdo.errorReason());
+  }
+  setCurrentMoistureValue(1000);
+}
+
+void connectToWiFi()
+{
   Serial.begin(115200);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED){
+  while (WiFi.status() != WL_CONNECTED)
+  {
     Serial.print(".");
     delay(300);
   }
@@ -43,48 +138,88 @@ void setup(){
   Serial.print("Connected with IP: ");
   Serial.println(WiFi.localIP());
   Serial.println();
+}
 
+void setupFirebase()
+{
   config.api_key = API_KEY;
-
   config.database_url = DATABASE_URL;
 
-  if (Firebase.signUp(&config, &auth, "", "")){
+  if (Firebase.signUp(&config, &auth, "", ""))
+  {
     Serial.println("ok");
     signupOK = true;
   }
-  else{
+  else
+  {
     Serial.printf("%s\n", config.signer.signupError.message.c_str());
   }
 
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-  
+  config.token_status_callback = tokenStatusCallback;
+
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 }
+void autoLogic()
+{
+  if (autoMotorOnOff)
+  {
+    if (soilMoistureValue > thresholdValue)
+    {
+      Serial.println("Soil is dry");
+      setMotor(true);
+    }
+    else
+    {
+      Serial.println("Soil is wet");
+      setMotor(false);
+    }
+  }
+  else
+  {
+    Serial.println("Auto mode is off");
+  }
+}
 
-void loop(){
-  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)){
-    sendDataPrevMillis = millis();
-    if (Firebase.RTDB.setInt(&fbdo, "test/int", count)){
-      Serial.println("PASSED");
-      Serial.println("PATH: " + fbdo.dataPath());
-      Serial.println("TYPE: " + fbdo.dataType());
+void setup()
+{
+  connectToWiFi();
+  setupFirebase();
+  pinMode(LED_BUILTIN, OUTPUT);
+  setAutoMotorOnOff(true);
+  setMotor(false);
+}
+
+void loop()
+{
+  if (Firebase.ready())
+  {
+    if (signupOK)
+    {
+      if (millis() - sendDataPrevMillis > 1500 || sendDataPrevMillis == 0)
+      {
+        sendDataPrevMillis = millis();
+        Serial.println("Time:" + millis());
+        readData();
+        autoLogic();
+
+        if (isMotorOn)
+        {
+          digitalWrite(LED_BUILTIN, HIGH);
+        }
+        else
+        {
+          digitalWrite(LED_BUILTIN, LOW);
+        }
+      }
     }
-    else {
-      Serial.println("FAILED");
-      Serial.println("REASON: " + fbdo.errorReason());
+    else
+    {
+      Serial.println("not signed up yet");
     }
-    count++;
-    
-    // Write an Float number on the database path test/float
-    if (Firebase.RTDB.setFloat(&fbdo, "test/float", 0.01 + random(0,100))){
-      Serial.println("PASSED");
-      Serial.println("PATH: " + fbdo.dataPath());
-      Serial.println("TYPE: " + fbdo.dataType());
-    }
-    else {
-      Serial.println("FAILED");
-      Serial.println("REASON: " + fbdo.errorReason());
-    }
+  }
+  else
+  {
+    Serial.println("Firebase not ready");
   }
 }
