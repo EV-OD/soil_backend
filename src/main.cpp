@@ -29,7 +29,10 @@ bool signupOK = false;
 bool isMotorOn = false;
 bool autoMotorOnOff = false;
 int soilMoistureValue = 0;
-int thresholdValue = 500;
+
+#define RELAY_PIN 17    // GPIO17
+#define MOISTURE_PIN 36 // GPIO04 (ADC0)
+#define thresholdValue 500
 
 void setMotor(bool isOn)
 {
@@ -181,9 +184,11 @@ void readData()
     Serial.println("FAILED");
     Serial.println("REASON: " + fbdo.errorReason());
   }
-  long int randomValue = random(0, 1000);
-  setCurrentMoistureValue(randomValue);
-  setMoistureDataWithDateAndTimeAsJson(randomValue);
+  int value = analogRead(MOISTURE_PIN);
+  long int moistureSensorValue = value;
+  Serial.println("Moisture Sensor Value: " + String(moistureSensorValue));
+  setCurrentMoistureValue(moistureSensorValue);
+  setMoistureDataWithDateAndTimeAsJson(moistureSensorValue);
 }
 
 void connectToWiFi()
@@ -226,7 +231,7 @@ void autoLogic()
 {
   if (autoMotorOnOff)
   {
-    if (soilMoistureValue > thresholdValue)
+    if (soilMoistureValue < thresholdValue)
     {
       Serial.println("Soil is dry");
       setMotor(true);
@@ -250,6 +255,7 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   setAutoMotorOnOff(true);
   setMotor(false);
+  pinMode(RELAY_PIN, OUTPUT);
 }
 
 void loop()
@@ -268,10 +274,12 @@ void loop()
         if (isMotorOn)
         {
           digitalWrite(LED_BUILTIN, HIGH);
+          digitalWrite(RELAY_PIN, LOW);
         }
         else
         {
           digitalWrite(LED_BUILTIN, LOW);
+          digitalWrite(RELAY_PIN, HIGH);
         }
       }
     }
